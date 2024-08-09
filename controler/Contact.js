@@ -4,6 +4,7 @@ const PDFDocument = require("pdfkit");
 const { PassThrough } = require("stream");
 
 const getContact = (req, res) => {
+  console.log("jrrrrr")
   const doc = new PDFDocument();
 
   const stream = new PassThrough();

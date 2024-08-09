@@ -4,8 +4,10 @@ const route = express.Router()
 
 const {getContact } = require('../controler/Contact')
 
+const {Authentication} = require('../middleware/Auth')
 
-route.get('/contact', someApiRequest)
+
+route.get('/contact',Authentication,someApiRequest)
 
 
 
