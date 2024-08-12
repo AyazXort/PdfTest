@@ -1,8 +1,14 @@
 const axios = require('axios');
 const AuthData = require('../database/auth'); 
 const qs = require('qs');
+const https = require('https')
 const PDFDocument = require("pdfkit");
 const { PassThrough } = require("stream");
+const FormData = require('form-data')
+const Tesseract = require('tesseract.js');
+const sharp = require('sharp');
+
+const fs = require('fs');
 const request = require('request');
 
 const CLIENT_ID = '66b3a1c018907b27627d2d6f-lzk2jsw7'; 
@@ -13,7 +19,7 @@ const getAuthorization = async (req, res) => {
     const scopes = 'contacts.readonly contacts.readonly contacts.write locations/customFields.write locations/customFields.readonly'; 
     const authURL = `https://marketplace.leadconnectorhq.com/oauth/chooselocation?response_type=code&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&client_id=${CLIENT_ID}&scope=${scopes}`;
 
-    console.log('Authorization URL:', authURL);
+  
     res.redirect(authURL);
 };
 
@@ -72,7 +78,7 @@ const getToken = async (req, res) => {
     }
 };
 
-// Function to refresh the access token
+
 const refreshAccessToken = async (refreshToken) => {
     try {
         const response = await axios.post('https://services.leadconnectorhq.com/oauth/token', qs.stringify({
@@ -118,18 +124,19 @@ axiosInstance.interceptors.response.use(
     async error => {
         const originalRequest = error.config;
  
-
         if (error.response.status === 401 && !originalRequest._retry) {
+           
             originalRequest._retry = true;
-            const authData = await AuthData.findOne(); 
-          
+            const authData = await AuthData.findOne({_id: originalRequest.params.id});
+            
+      
 
             if (authData && authData.refreshToken) {
                 try {
                     
                     
                     const newAccessToken = await refreshAccessToken(authData.refreshToken);
-                    
+                   
                    
                     axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
             
@@ -146,97 +153,159 @@ axiosInstance.interceptors.response.use(
 );
 
 
-const generatePDF = (contactDetails) => {
+// const downloadImage = async (url) => {
+//     try {
+//         const response = await axios({
+//             url: url,
+//             method: 'GET',
+//             responseType: 'arraybuffer',
+//             maxRedirects: 5
+//         });
+//         return Buffer.from(response.data);
+//     } catch (error) {
+//         throw new Error(`Failed to get image. Error: ${error.message}`);
+//     }
+// };
+
+// // Extract text from image buffer with pre-processing
+// const extractTextFromImage = async (imageBuffer) => {
+//     try {
+//         const processedBuffer = await sharp(imageBuffer)
+//             .resize(1024) // Resize if needed
+//             .greyscale() // Convert to greyscale to improve OCR results
+//             .toBuffer();
+        
+//         const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
+//             logger: info => console.log(info)
+//         });
+//         return text;
+//     } catch (error) {
+//         throw new Error(`Error processing image: ${error.message}`);
+//     }
+// };
+
+const downloadImage = async (url) => {
+    try {
+        const response = await axios({
+            url: url,
+            method: 'GET',
+            responseType: 'arraybuffer' 
+        });
+        return Buffer.from(response.data); 
+    } catch (error) {
+        throw new Error(`Failed to download image. Error: ${error.message}`);
+    }
+};
+const resizeImage = async (imageBuffer) => {
+    return sharp(imageBuffer)
+        .resize(100)
+        .toBuffer();
+};
+
+
+const generatePDF = async (contactDetails) => {
+    const { firstName, email, lastName, country, customFields } = contactDetails;
+    const urlObject = customFields.find(item => item.id === 'QzqFF3DIKd9TYlEbH1FW');
+    const url = urlObject ? urlObject.value.url : null;
+
+    const imageBuffer = await downloadImage(url);
+    const resizedImageBuffer = await resizeImage(imageBuffer);
+    const doc = new PDFDocument();
+    const chunks = [];
+    const stream = new PassThrough();
+    console.log(url,"url")
+    doc.pipe(stream);
+    doc.image(resizedImageBuffer, {
+        fit: [300, 300], 
+        align: 'center',
+        valign: 'center'
+    });
+
+    
+
+    doc.fontSize(25).text("Contact Details:", 100, 100);
+    doc.fontSize(15).text(`Name: ${firstName}`, 100, 150);
+    doc.text(`Email: ${email}`, 100, 180);
+    doc.text(`Country: ${country}`, 100, 210);
+    doc.text(`Last Name: ${lastName}`, 100, 240);
+    // doc.text(`Extracted Text: ${extractedText}`, 100, 270);
+
+    doc.end();
+
     return new Promise((resolve, reject) => {
-        const doc = new PDFDocument();
-        const stream = new PassThrough();
-
-        doc.pipe(stream);
-
-        doc.fontSize(25).text("Contact Details:", 100, 100);
-        const { firstName, email, lastName, country } = contactDetails;
-
-        doc.fontSize(15).text(`Name: ${firstName}`, 100, 150);
-        doc.text(`Email: ${email}`, 100, 180);
-        doc.text(`Country: ${country}`, 100, 210); // Adjusted for spacing
-        doc.text(`Last Name: ${lastName}`, 100, 240); // Adjusted for spacing
-
-        doc.end();
-
-        // Collect PDF data
-        const chunks = [];
         stream.on('data', chunk => chunks.push(chunk));
         stream.on('end', () => resolve(Buffer.concat(chunks)));
         stream.on('error', reject);
     });
 };
 
-const updateContact = async (contactId, contactDetails, pdfData) => {
-    const options = {
-        method: 'PUT',
-        url: `https://services.leadconnectorhq.com/contacts/${contactId}`,
-        headers: {
-            Authorization: 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoQ2xhc3MiOiJMb2NhdGlvbiIsImF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJzb3VyY2UiOiJJTlRFR1JBVElPTiIsInNvdXJjZUlkIjoiNjZiM2ExYzAxODkwN2IyNzYyN2QyZDZmLWx6azJqc3c3IiwiY2hhbm5lbCI6Ik9BVVRIIiwicHJpbWFyeUF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJvYXV0aE1ldGEiOnsic2NvcGVzIjpbImNvbnRhY3RzLnJlYWRvbmx5IiwiY29udGFjdHMucmVhZG9ubHkiLCJjb250YWN0cy53cml0ZSIsImxvY2F0aW9ucy9jdXN0b21GaWVsZHMud3JpdGUiLCJsb2NhdGlvbnMvY3VzdG9tRmllbGRzLnJlYWRvbmx5Il0sImNsaWVudCI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2ZiIsImNsaWVudEtleSI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2Zi1semsyanN3NyJ9LCJpYXQiOjE3MjMyNDM3MDkuNjc0LCJleHAiOjE3MjMzMzAxMDkuNjc0fQ.hu1ODi4xh8yuNTeu1Rs82tDtZQKudvs56IKx7RjK5WNxBa25TaoFNsbLnL6EpXYmonKaTerTxgQhK1HP9XKSmzmWqNFNl1MIp1Jo1nhAKJYE0IsnQ2Gj_eaqHihBXL_MeVqXVkRNXguHy0bG9XbuWcHhV4RSgNHDXUcLIXTaSGwmItJMSxl92fHdy4m6YpF5om3w4NcNX0qkPODjH6Lt1SvGz1iNq-dBl9pU1HUU3uudKUeRUId5SxUIsDqZomvPSrgNDNM0jzBXdD1_XQdq_H76GfHXXfmtGxohQG09X7B5L84TqN7zAJ0HghaSPA-9DICUbyCsO2wxMrjPfCVxaxuw9l1mgWluRC9omiF6HMYEx55nSYI1SC94mwHYJH48dsQ-fMV7Bm5fzWHRxXxW6mBtPk76CJ7kO92OLn52t1TWeLdvdV4cmzcmDJV1fCkICtyDUAehZZ9O_zxTpalvDdD-BF8sfCMXxLXwJ5cszs-uX3cqxeVqj2LGZd_O3vzKRNLBT-Bk16R67e9MsdEAXABTyg65XzjIf2cYa8Loo4CMmX4uqHl6OwzuwVDMZTnyoHbqhAhlCDkHGzTzxmFJN7RDDaDJyRGjEdxoU6Qgr9gxhhkU5lQ0mCpI3YtRmfC8w2DaoTuA9azL-DapVqy_uKPE02PKhcrGiz8_hPRRqv8',
-            "Version": '2021-07-28',
-            'Content-Type': 'application/json',
-            "Accept": 'application/json'
-        },
-        body: JSON.stringify({
-          
-            customFields: [
-                {
-                    // id: '6dvNaf7VhkQ9snc5vnjJ', 
-                    key: 'pdf_gen', 
-                    field_value: pdfData.toString('base64') 
-                }
-            ]
-        })
-    };
+const uploadPDF = async (locationId, pdfData, additionalParams={}) => {
+    const url = `https://services.leadconnectorhq.com/locations/${locationId}/customFields/upload`; 
+    const token = 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoQ2xhc3MiOiJMb2NhdGlvbiIsImF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJzb3VyY2UiOiJJTlRFR1JBVElPTiIsInNvdXJjZUlkIjoiNjZiM2ExYzAxODkwN2IyNzYyN2QyZDZmLWx6azJqc3c3IiwiY2hhbm5lbCI6Ik9BVVRIIiwicHJpbWFyeUF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJvYXV0aE1ldGEiOnsic2NvcGVzIjpbImNvbnRhY3RzLnJlYWRvbmx5IiwiY29udGFjdHMucmVhZG9ubHkiLCJjb250YWN0cy53cml0ZSIsImxvY2F0aW9ucy9jdXN0b21GaWVsZHMud3JpdGUiLCJsb2NhdGlvbnMvY3VzdG9tRmllbGRzLnJlYWRvbmx5Il0sImNsaWVudCI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2ZiIsImNsaWVudEtleSI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2Zi1semsyanN3NyJ9LCJpYXQiOjE3MjM0OTM3NTIuMjgzLCJleHAiOjE3MjM1ODAxNTIuMjgzfQ.PGo4gFSl2pvCsMqqfzebkKvG_cq0DXFFVijTDJSxE71hf4E7C2XXoKcA8jdVp3Jn4HH0FIOKtG9KloJslUQ1GmihRsV0ZbEulIidClpq9B5FDGW9HfL67nUnh-GCSjrytPzpMHNVIkjx5Out03o_tMpIYalABhJVIUSeMsCH6yrbL8PWY1v4wZfsLvKqW_dNR81rSUSncY-IGuscmWo-Wvn2hGLGWp60GenB6-uiGlgAcjzat0KtBuHmVzfcLc0AHq6UW34xkzp85uEnru2pvntE8gY08MQ8HPyblywzhlVcBlB6II0XHBS90i7Yy5iuer6oEkQv5YRjrvNk7VDrKOEQ4WXAcDkca-5cVXlkxXtyJ5-ok1U4hXyJT63ssWj70JV3iNtvTZjcKImcCkqBk6ZsLOjNM7v2e-4t8KYO_h7Vyppl76-itYiJEz7CvzKHyfUAOP_U6fMv_ythPZKRWPxik26fstFqZuWx2wYc_2z73QkcQrMcqBQWtMW-tNnE1FgsevGIzPLLIj7Z4pn6uEIM60NeVONm8h8zPBWtaPMwECMEmhTs0OptFPpB7rDcrbrnIwXy80XwZyR6tkkHElYg1wJIT_TJBTG8Y8NPrq4bnktzqU96Mx4vLuVt3mwSkUrAW3SYNZV4DWA0QbXJl6vDxjByL85ZnMSEvF42S90'; 
+    const version = '2021-07-28';
+    if (!Buffer.isBuffer(pdfData)) {
+        throw new Error('pdfData must be a Buffer');
+    }
+    const form = new FormData();
 
-    return new Promise((resolve, reject) => {
-        request(options, (error, response, body) => {
-            if (error) {
-                return reject(error);
-            }
-            try {
-                const parsedBody = JSON.parse(body);
-                resolve(parsedBody);
-            } catch (e) {
-                reject(new Error(`Failed to parse response: ${e.message}`));
+    form.append('file', pdfData, {
+        filename: 'file.pdf',
+        contentType: 'application/pdf'
+    });
+
+    for (const [key, value] of Object.entries(additionalParams)) {
+        form.append(key, value);
+    }
+    try {
+        const response = await axios.post(url, form, {
+            headers: {
+                ...form.getHeaders(),
+                'Authorization': token,
+                'Version': version
             }
         });
-    });
+        return response.data;
+    } catch (error) {
+        console.error('Error uploading PDF:', error.response ? error.response.data : error.message);
+        throw error;
+    }
 };
 
 const someApiRequest = async (req, res) => {
-    console.log("heeeloo worldssss");
+ 
     const authData = await AuthData.findOne(); 
+    const locaionId = "vcLxBfw01Nmv2VnlhtND"
 
     try {
-        const response = await axiosInstance.get(`https://services.leadconnectorhq.com/contacts/BaN2668s5OUtEQ0Ue4kO`, {
+        const response = await axiosInstance.get(`https://services.leadconnectorhq.com/contacts/mi4jD7brRKuiSzwA1A0A`, {
             headers: {
-                'Authorization': `Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoQ2xhc3MiOiJMb2NhdGlvbiIsImF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJzb3VyY2UiOiJJTlRFR1JBVElPTiIsInNvdXJjZUlkIjoiNjZiM2ExYzAxODkwN2IyNzYyN2QyZDZmLWx6azJqc3c3IiwiY2hhbm5lbCI6Ik9BVVRIIiwicHJpbWFyeUF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJvYXV0aE1ldGEiOnsic2NvcGVzIjpbImNvbnRhY3RzLnJlYWRvbmx5IiwiY29udGFjdHMucmVhZG9ubHkiLCJjb250YWN0cy53cml0ZSIsImxvY2F0aW9ucy9jdXN0b21GaWVsZHMud3JpdGUiLCJsb2NhdGlvbnMvY3VzdG9tRmllbGRzLnJlYWRvbmx5Il0sImNsaWVudCI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2ZiIsImNsaWVudEtleSI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2Zi1semsyanN3NyJ9LCJpYXQiOjE3MjMyNDM3MDkuNjc0LCJleHAiOjE3MjMzMzAxMDkuNjc0fQ.hu1ODi4xh8yuNTeu1Rs82tDtZQKudvs56IKx7RjK5WNxBa25TaoFNsbLnL6EpXYmonKaTerTxgQhK1HP9XKSmzmWqNFNl1MIp1Jo1nhAKJYE0IsnQ2Gj_eaqHihBXL_MeVqXVkRNXguHy0bG9XbuWcHhV4RSgNHDXUcLIXTaSGwmItJMSxl92fHdy4m6YpF5om3w4NcNX0qkPODjH6Lt1SvGz1iNq-dBl9pU1HUU3uudKUeRUId5SxUIsDqZomvPSrgNDNM0jzBXdD1_XQdq_H76GfHXXfmtGxohQG09X7B5L84TqN7zAJ0HghaSPA-9DICUbyCsO2wxMrjPfCVxaxuw9l1mgWluRC9omiF6HMYEx55nSYI1SC94mwHYJH48dsQ-fMV7Bm5fzWHRxXxW6mBtPk76CJ7kO92OLn52t1TWeLdvdV4cmzcmDJV1fCkICtyDUAehZZ9O_zxTpalvDdD-BF8sfCMXxLXwJ5cszs-uX3cqxeVqj2LGZd_O3vzKRNLBT-Bk16R67e9MsdEAXABTyg65XzjIf2cYa8Loo4CMmX4uqHl6OwzuwVDMZTnyoHbqhAhlCDkHGzTzxmFJN7RDDaDJyRGjEdxoU6Qgr9gxhhkU5lQ0mCpI3YtRmfC8w2DaoTuA9azL-DapVqy_uKPE02PKhcrGiz8_hPRRqv8`,
+                'Authorization': `Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoQ2xhc3MiOiJMb2NhdGlvbiIsImF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJzb3VyY2UiOiJJTlRFR1JBVElPTiIsInNvdXJjZUlkIjoiNjZiM2ExYzAxODkwN2IyNzYyN2QyZDZmLWx6azJqc3c3IiwiY2hhbm5lbCI6Ik9BVVRIIiwicHJpbWFyeUF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJvYXV0aE1ldGEiOnsic2NvcGVzIjpbImNvbnRhY3RzLnJlYWRvbmx5IiwiY29udGFjdHMucmVhZG9ubHkiLCJjb250YWN0cy53cml0ZSIsImxvY2F0aW9ucy9jdXN0b21GaWVsZHMud3JpdGUiLCJsb2NhdGlvbnMvY3VzdG9tRmllbGRzLnJlYWRvbmx5Il0sImNsaWVudCI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2ZiIsImNsaWVudEtleSI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2Zi1semsyanN3NyJ9LCJpYXQiOjE3MjM0OTM3NTIuMjgzLCJleHAiOjE3MjM1ODAxNTIuMjgzfQ.PGo4gFSl2pvCsMqqfzebkKvG_cq0DXFFVijTDJSxE71hf4E7C2XXoKcA8jdVp3Jn4HH0FIOKtG9KloJslUQ1GmihRsV0ZbEulIidClpq9B5FDGW9HfL67nUnh-GCSjrytPzpMHNVIkjx5Out03o_tMpIYalABhJVIUSeMsCH6yrbL8PWY1v4wZfsLvKqW_dNR81rSUSncY-IGuscmWo-Wvn2hGLGWp60GenB6-uiGlgAcjzat0KtBuHmVzfcLc0AHq6UW34xkzp85uEnru2pvntE8gY08MQ8HPyblywzhlVcBlB6II0XHBS90i7Yy5iuer6oEkQv5YRjrvNk7VDrKOEQ4WXAcDkca-5cVXlkxXtyJ5-ok1U4hXyJT63ssWj70JV3iNtvTZjcKImcCkqBk6ZsLOjNM7v2e-4t8KYO_h7Vyppl76-itYiJEz7CvzKHyfUAOP_U6fMv_ythPZKRWPxik26fstFqZuWx2wYc_2z73QkcQrMcqBQWtMW-tNnE1FgsevGIzPLLIj7Z4pn6uEIM60NeVONm8h8zPBWtaPMwECMEmhTs0OptFPpB7rDcrbrnIwXy80XwZyR6tkkHElYg1wJIT_TJBTG8Y8NPrq4bnktzqU96Mx4vLuVt3mwSkUrAW3SYNZV4DWA0QbXJl6vDxjByL85ZnMSEvF42S90`,
                 'Version': '2021-07-28',
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Accept': 'application/json',
             },
             params: {
-                locationId: 'vcLxBfw01Nmv2VnlhtND',
+                locationId: locaionId,
+                id : "66ba5e5ef071e58d781ac09f",
                 limit: 20
             }
         });
-   console.log(response, "response")
+ 
 
    const contactDetails = response.data.contact;
+   
 
-   // Generate PDF
+
    const pdfData = await generatePDF(contactDetails);
 
-   // Update Contact with PDF as a custom field
-   const contactId = 'BaN2668s5OUtEQ0Ue4kO'; // replace with actual contactId
-   const updateResponse = await updateContact(contactId, contactDetails, pdfData);
+   const contactId = 'BaN2668s5OUtEQ0Ue4kO'; 
+   const additionalParams = {
+    id: 'BaN2668s5OUtEQ0Ue4kO', 
+    maxFiles: '1'
+};
+   const updateResponse = await uploadPDF(locaionId, pdfData,additionalParams);
 
-   console.log('Update response:', updateResponse);
+
 
    res.status(200).json(updateResponse);
 
