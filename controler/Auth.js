@@ -1,19 +1,14 @@
 const axios = require('axios');
 const AuthData = require('../database/auth'); 
 const qs = require('qs');
-const https = require('https')
-const PDFDocument = require("pdfkit");
-const { PassThrough } = require("stream");
-const FormData = require('form-data')
-const Tesseract = require('tesseract.js');
-const sharp = require('sharp');
 
-const fs = require('fs');
-const request = require('request');
 
-const CLIENT_ID = '66b3a1c018907b27627d2d6f-lzk2jsw7'; 
-const CLIENT_SECRET = 'c2f1eb17-bbb5-4580-a495-d439639b4bef'; 
-const REDIRECT_URI = 'http://localhost:3000/oauth/callback';
+
+
+
+const CLIENT_ID = process.env.CLIENT_ID; 
+const CLIENT_SECRET = process.env.client_secret; 
+const REDIRECT_URI = process.env.REDIRECT_URI
 
 const getAuthorization = async (req, res) => {
     const scopes = 'contacts.readonly contacts.readonly contacts.write locations/customFields.write locations/customFields.readonly'; 
@@ -101,7 +96,7 @@ const refreshAccessToken = async (refreshToken) => {
         await AuthData.findOneAndUpdate(
             { refreshToken: refreshToken },
             { accessToken: access_token, refreshToken: refresh_token },
-            { new: true } // Return the updated document
+            { new: true } 
         );
    
 
@@ -129,8 +124,8 @@ axiosInstance.interceptors.response.use(
             originalRequest._retry = true;
             const authData = await AuthData.findOne({_id: originalRequest.params.id});
             
-      
-
+                console.log(authData.refreshToken,"authData.refreshToken")
+            
             if (authData && authData.refreshToken) {
                 try {
                     
@@ -153,169 +148,7 @@ axiosInstance.interceptors.response.use(
 );
 
 
-// const downloadImage = async (url) => {
-//     try {
-//         const response = await axios({
-//             url: url,
-//             method: 'GET',
-//             responseType: 'arraybuffer',
-//             maxRedirects: 5
-//         });
-//         return Buffer.from(response.data);
-//     } catch (error) {
-//         throw new Error(`Failed to get image. Error: ${error.message}`);
-//     }
-// };
-
-// // Extract text from image buffer with pre-processing
-// const extractTextFromImage = async (imageBuffer) => {
-//     try {
-//         const processedBuffer = await sharp(imageBuffer)
-//             .resize(1024) // Resize if needed
-//             .greyscale() // Convert to greyscale to improve OCR results
-//             .toBuffer();
-        
-//         const { data: { text } } = await Tesseract.recognize(processedBuffer, 'eng', {
-//             logger: info => console.log(info)
-//         });
-//         return text;
-//     } catch (error) {
-//         throw new Error(`Error processing image: ${error.message}`);
-//     }
-// };
-
-const downloadImage = async (url) => {
-    try {
-        const response = await axios({
-            url: url,
-            method: 'GET',
-            responseType: 'arraybuffer' 
-        });
-        return Buffer.from(response.data); 
-    } catch (error) {
-        throw new Error(`Failed to download image. Error: ${error.message}`);
-    }
-};
-const resizeImage = async (imageBuffer) => {
-    return sharp(imageBuffer)
-        .resize(100)
-        .toBuffer();
-};
-
-
-const generatePDF = async (contactDetails) => {
-    const { firstName, email, lastName, country, customFields } = contactDetails;
-    const urlObject = customFields.find(item => item.id === 'QzqFF3DIKd9TYlEbH1FW');
-    const url = urlObject ? urlObject.value.url : null;
-
-    const imageBuffer = await downloadImage(url);
-    const resizedImageBuffer = await resizeImage(imageBuffer);
-    const doc = new PDFDocument();
-    const chunks = [];
-    const stream = new PassThrough();
-    console.log(url,"url")
-    doc.pipe(stream);
-    doc.image(resizedImageBuffer, {
-        fit: [300, 300], 
-        align: 'center',
-        valign: 'center'
-    });
-
-    
-
-    doc.fontSize(25).text("Contact Details:", 100, 100);
-    doc.fontSize(15).text(`Name: ${firstName}`, 100, 150);
-    doc.text(`Email: ${email}`, 100, 180);
-    doc.text(`Country: ${country}`, 100, 210);
-    doc.text(`Last Name: ${lastName}`, 100, 240);
-    // doc.text(`Extracted Text: ${extractedText}`, 100, 270);
-
-    doc.end();
-
-    return new Promise((resolve, reject) => {
-        stream.on('data', chunk => chunks.push(chunk));
-        stream.on('end', () => resolve(Buffer.concat(chunks)));
-        stream.on('error', reject);
-    });
-};
-
-const uploadPDF = async (locationId, pdfData, additionalParams={}) => {
-    const url = `https://services.leadconnectorhq.com/locations/${locationId}/customFields/upload`; 
-    const token = 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoQ2xhc3MiOiJMb2NhdGlvbiIsImF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJzb3VyY2UiOiJJTlRFR1JBVElPTiIsInNvdXJjZUlkIjoiNjZiM2ExYzAxODkwN2IyNzYyN2QyZDZmLWx6azJqc3c3IiwiY2hhbm5lbCI6Ik9BVVRIIiwicHJpbWFyeUF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJvYXV0aE1ldGEiOnsic2NvcGVzIjpbImNvbnRhY3RzLnJlYWRvbmx5IiwiY29udGFjdHMucmVhZG9ubHkiLCJjb250YWN0cy53cml0ZSIsImxvY2F0aW9ucy9jdXN0b21GaWVsZHMud3JpdGUiLCJsb2NhdGlvbnMvY3VzdG9tRmllbGRzLnJlYWRvbmx5Il0sImNsaWVudCI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2ZiIsImNsaWVudEtleSI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2Zi1semsyanN3NyJ9LCJpYXQiOjE3MjM0OTM3NTIuMjgzLCJleHAiOjE3MjM1ODAxNTIuMjgzfQ.PGo4gFSl2pvCsMqqfzebkKvG_cq0DXFFVijTDJSxE71hf4E7C2XXoKcA8jdVp3Jn4HH0FIOKtG9KloJslUQ1GmihRsV0ZbEulIidClpq9B5FDGW9HfL67nUnh-GCSjrytPzpMHNVIkjx5Out03o_tMpIYalABhJVIUSeMsCH6yrbL8PWY1v4wZfsLvKqW_dNR81rSUSncY-IGuscmWo-Wvn2hGLGWp60GenB6-uiGlgAcjzat0KtBuHmVzfcLc0AHq6UW34xkzp85uEnru2pvntE8gY08MQ8HPyblywzhlVcBlB6II0XHBS90i7Yy5iuer6oEkQv5YRjrvNk7VDrKOEQ4WXAcDkca-5cVXlkxXtyJ5-ok1U4hXyJT63ssWj70JV3iNtvTZjcKImcCkqBk6ZsLOjNM7v2e-4t8KYO_h7Vyppl76-itYiJEz7CvzKHyfUAOP_U6fMv_ythPZKRWPxik26fstFqZuWx2wYc_2z73QkcQrMcqBQWtMW-tNnE1FgsevGIzPLLIj7Z4pn6uEIM60NeVONm8h8zPBWtaPMwECMEmhTs0OptFPpB7rDcrbrnIwXy80XwZyR6tkkHElYg1wJIT_TJBTG8Y8NPrq4bnktzqU96Mx4vLuVt3mwSkUrAW3SYNZV4DWA0QbXJl6vDxjByL85ZnMSEvF42S90'; 
-    const version = '2021-07-28';
-    if (!Buffer.isBuffer(pdfData)) {
-        throw new Error('pdfData must be a Buffer');
-    }
-    const form = new FormData();
-
-    form.append('file', pdfData, {
-        filename: 'file.pdf',
-        contentType: 'application/pdf'
-    });
-
-    for (const [key, value] of Object.entries(additionalParams)) {
-        form.append(key, value);
-    }
-    try {
-        const response = await axios.post(url, form, {
-            headers: {
-                ...form.getHeaders(),
-                'Authorization': token,
-                'Version': version
-            }
-        });
-        return response.data;
-    } catch (error) {
-        console.error('Error uploading PDF:', error.response ? error.response.data : error.message);
-        throw error;
-    }
-};
-
-const someApiRequest = async (req, res) => {
- 
-    const authData = await AuthData.findOne(); 
-    const locaionId = "vcLxBfw01Nmv2VnlhtND"
-
-    try {
-        const response = await axiosInstance.get(`https://services.leadconnectorhq.com/contacts/mi4jD7brRKuiSzwA1A0A`, {
-            headers: {
-                'Authorization': `Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRoQ2xhc3MiOiJMb2NhdGlvbiIsImF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJzb3VyY2UiOiJJTlRFR1JBVElPTiIsInNvdXJjZUlkIjoiNjZiM2ExYzAxODkwN2IyNzYyN2QyZDZmLWx6azJqc3c3IiwiY2hhbm5lbCI6Ik9BVVRIIiwicHJpbWFyeUF1dGhDbGFzc0lkIjoidmNMeEJmdzAxTm12MlZubGh0TkQiLCJvYXV0aE1ldGEiOnsic2NvcGVzIjpbImNvbnRhY3RzLnJlYWRvbmx5IiwiY29udGFjdHMucmVhZG9ubHkiLCJjb250YWN0cy53cml0ZSIsImxvY2F0aW9ucy9jdXN0b21GaWVsZHMud3JpdGUiLCJsb2NhdGlvbnMvY3VzdG9tRmllbGRzLnJlYWRvbmx5Il0sImNsaWVudCI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2ZiIsImNsaWVudEtleSI6IjY2YjNhMWMwMTg5MDdiMjc2MjdkMmQ2Zi1semsyanN3NyJ9LCJpYXQiOjE3MjM0OTM3NTIuMjgzLCJleHAiOjE3MjM1ODAxNTIuMjgzfQ.PGo4gFSl2pvCsMqqfzebkKvG_cq0DXFFVijTDJSxE71hf4E7C2XXoKcA8jdVp3Jn4HH0FIOKtG9KloJslUQ1GmihRsV0ZbEulIidClpq9B5FDGW9HfL67nUnh-GCSjrytPzpMHNVIkjx5Out03o_tMpIYalABhJVIUSeMsCH6yrbL8PWY1v4wZfsLvKqW_dNR81rSUSncY-IGuscmWo-Wvn2hGLGWp60GenB6-uiGlgAcjzat0KtBuHmVzfcLc0AHq6UW34xkzp85uEnru2pvntE8gY08MQ8HPyblywzhlVcBlB6II0XHBS90i7Yy5iuer6oEkQv5YRjrvNk7VDrKOEQ4WXAcDkca-5cVXlkxXtyJ5-ok1U4hXyJT63ssWj70JV3iNtvTZjcKImcCkqBk6ZsLOjNM7v2e-4t8KYO_h7Vyppl76-itYiJEz7CvzKHyfUAOP_U6fMv_ythPZKRWPxik26fstFqZuWx2wYc_2z73QkcQrMcqBQWtMW-tNnE1FgsevGIzPLLIj7Z4pn6uEIM60NeVONm8h8zPBWtaPMwECMEmhTs0OptFPpB7rDcrbrnIwXy80XwZyR6tkkHElYg1wJIT_TJBTG8Y8NPrq4bnktzqU96Mx4vLuVt3mwSkUrAW3SYNZV4DWA0QbXJl6vDxjByL85ZnMSEvF42S90`,
-                'Version': '2021-07-28',
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Accept': 'application/json',
-            },
-            params: {
-                locationId: locaionId,
-                id : "66ba5e5ef071e58d781ac09f",
-                limit: 20
-            }
-        });
- 
-
-   const contactDetails = response.data.contact;
-   
-
-
-   const pdfData = await generatePDF(contactDetails);
-
-   const contactId = 'BaN2668s5OUtEQ0Ue4kO'; 
-   const additionalParams = {
-    id: 'BaN2668s5OUtEQ0Ue4kO', 
-    maxFiles: '1'
-};
-   const updateResponse = await uploadPDF(locaionId, pdfData,additionalParams);
 
 
 
-   res.status(200).json(updateResponse);
-
-} catch (error) {
-   console.error("Error:", error);
-   res.status(500).json({ error: 'An error occurred' });
-}
-
-       
-    
-};
-
-module.exports = { getAuthorization, getToken, axiosInstance, someApiRequest };
+module.exports = { getAuthorization, getToken, axiosInstance,  };
