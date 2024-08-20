@@ -2,7 +2,7 @@ const express = require('express')
 const {axiosInstance,someApiRequest} = require('../controler/Auth')
 const route = express.Router()
 
-const {getPDF } = require('../controler/Contact')
+const {getPDF } = require('../controler/GeneratePdf')
 
 const {Authentication} = require('../middleware/Auth')
 

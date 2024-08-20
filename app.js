@@ -3,10 +3,13 @@ const bodyParser = require('body-parser');
 const { connectDB } = require('./database/dbconnect');
 const authRoute = require('./routes/auth');
 const contactRoute = require('./routes/contact');
+const app = express();
+const cors = require('cors');
 require('dotenv').config()
+app.use(cors());
 const PORT = process.env.PORT 
 
-const app = express();
+
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());

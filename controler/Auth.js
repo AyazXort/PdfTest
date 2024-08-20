@@ -6,9 +6,9 @@ const qs = require('qs');
 
 
 
-const CLIENT_ID = process.env.CLIENT_ID; 
-const CLIENT_SECRET = process.env.client_secret; 
-const REDIRECT_URI = process.env.REDIRECT_URI
+const CLIENT_ID = process.env.CLIENT_ID ||  '66b3a1c018907b27627d2d6f-m02uacsi';
+const CLIENT_SECRET = process.env.client_secret ||  'cb07d984-84bf-47e6-a541-e46f104aea6c'
+const REDIRECT_URI = process.env.REDIRECT_URI  || 'http://localhost:3000/oauth/callback';
 
 const getAuthorization = async (req, res) => {
     const scopes = 'contacts.readonly contacts.readonly contacts.write locations/customFields.write locations/customFields.readonly'; 
@@ -110,7 +110,11 @@ const refreshAccessToken = async (refreshToken) => {
     }
 };
 
-const axiosInstance = axios.create();
+const axiosInstance = axios.create({
+    httpsAgent: new (require('https')).Agent({  
+        rejectUnauthorized: false 
+    })
+});
 
 
 
@@ -119,7 +123,7 @@ axiosInstance.interceptors.response.use(
     async error => {
         const originalRequest = error.config;
  
-        if (error.response.status === 401 && !originalRequest._retry) {
+        if (error.response && error.response.status=== 401 && !originalRequest._retry) {
            
             originalRequest._retry = true;
             const authData = await AuthData.findOne({_id: originalRequest.params.id});
