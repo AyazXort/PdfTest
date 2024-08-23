@@ -2,24 +2,21 @@ let buttonsAdded = false;
 const baseUrlPattern = 'https://app.gohighlevel.com/v2/location/vcLxBfw01Nmv2VnlhtND/contacts/detail';
 function getIdFromUrl() {
     const path = window.location.pathname;
-    console.log('Current Path:', path);
+  
 
     const segments = path.split('/');
-    const id = segments.pop(); // The ID is the last segment of the path
+    const id = segments.pop(); 
 
-    console.log('Extracted ID:', id); // Log the extracted ID
+    console.log('Extracted ID:', id); 
     return id;
 }
-// Function to check if the current URL matches the base URL pattern
+
 function isTargetUrl() {
     const path = window.location.href;
-    console.log('Current URL:', path);
-    
-    // Check if the URL starts with the base URL pattern
     return path.startsWith(baseUrlPattern);
 }
 
-// Function to create and handle downloads
+
 function createButton(id, text, click) {
     const button = document.createElement('button');
     button.id = id;
@@ -32,28 +29,27 @@ function createButton(id, text, click) {
 
 function initializeButtons() {
     if (isTargetUrl() && !buttonsAdded) {
-        const container = document.getElementsByClassName('contact-detail-nav');
-        if (container) {
-           
+        const containers = document.getElementsByClassName('contact-detail-nav');
+        if (containers.length > 0) {
+            const container = containers[0]; 
+
             const existingPdfButton = document.getElementById('downloadPdfBtn');
             const existingCsvButton = document.getElementById('downloadCsvBtn');
             if (existingPdfButton) container.removeChild(existingPdfButton);
             if (existingCsvButton) container.removeChild(existingCsvButton);
-            
-         
+
             const pdfButton = createButton('downloadPdfBtn', 'Download PDF', handlePdfDownload);
             const csvButton = createButton('downloadCsvBtn', 'Download CSV', handleCsvDownload);
-            
+
             container.appendChild(pdfButton);
             container.appendChild(csvButton);
-            
+
             buttonsAdded = true;
             console.log('Buttons added successfully');
         } else {
-            console.error('Element with id OwnersComponent not found');
+            console.error('Element with class contact-detail-nav not found');
         }
     } else if (!isTargetUrl() && buttonsAdded) {
-        
         buttonsAdded = false;
     }
 }
